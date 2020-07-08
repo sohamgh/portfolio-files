@@ -1,0 +1,208 @@
+OJ <- read.csv("oj.csv")
+install.packages('dplyr')
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+#install.packages('glmnet')
+library(glmnet)
+OJ <- read.csv("oj.csv")
+OJ$logp <- log(OJ$price)
+#########Q1##############################################
+Df1 <- OJ
+Df1$week <- Df1$week+1
+
+Df2 <- merge(OJ, Df1, by=c("brand","store","week"))
+
+Df2 <- Df2 %>% 
+  rename(
+    lastweekprice = price.x ,
+    lastweeklogp = logp.x,
+    lastweekfeat = feat.x, 
+    logmove= logmove.y, 
+    logp= logp.y,
+    feat = feat.y , 
+    EDUC = EDUC.y, 
+    INCOME = INCOME.y, 
+    ETHNIC = ETHNIC.y , 
+    AGE60 = AGE60.y , 
+    HHLARGE = HHLARGE.y
+  )
+set.seed(10)
+size <- nrow(Df2)
+set1 <- Df2[sample(size, 0.2 * size, replace = FALSE),]
+set2<- Df2[sample(size, 0.2 * size, replace = FALSE),]
+set3<- Df2[sample(size, 0.2 * size, replace = FALSE),]
+set4 <- Df2[sample(size, 0.2 * size, replace = FALSE),]
+set5<- Df2[sample(size, 0.2 * size, replace = FALSE),]
+
+Train5 <- rbind(set1, rbind(set2, rbind(set3, set4)))
+Train4 <- rbind(set1, rbind(set2, rbind(set3, set5)))
+Train3 <- rbind(set1, rbind(set2, rbind(set4, set5)))
+Train2 <- rbind(set1, rbind(set3, rbind(set4, set5)))
+Train1 <- rbind(set2, rbind(set3, rbind(set4, set5)))
+
+regDemo1 <-  lm(logmove ~ logp + (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 + lastweeklogp , data = Train1)
+regDemo2 <-  lm(logmove ~ logp + (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 , data = Train2)
+regDemo3 <-  lm(logmove ~ logp + (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 , data = Train3)
+regDemo4 <-  lm(logmove ~ logp + (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 , data = Train4)
+regDemo5 <-  lm(logmove ~ logp + (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 , data = Train5)
+
+MSE1 <- mean((set1$logmove - predict.lm(regDemo1, set1)) ^ 2)
+MSE2 <- mean((set2$logmove - predict.lm(regDemo2, set2)) ^ 2)
+MSE3 <- mean((set3$logmove - predict.lm(regDemo3, set3)) ^ 2)
+MSE4 <- mean((set4$logmove - predict.lm(regDemo4, set4)) ^ 2)
+MSE5 <- mean((set5$logmove - predict.lm(regDemo5, set5)) ^ 2)
+
+Average_CVMSE <- sum(MSE1, MSE2, MSE3, MSE4, MSE5)/5
+
+####################################q2##################using train5 and testing set5 pair.
+# removing logmove column
+X <- model.matrix(logmove ~ logp + lastweeklogp + (lastweeklogp * brand) + 
+                    (lastweeklogp * INCOME) + (lastweeklogp * logp)+ (logp * brand) + 
+                    (brand * feat) + brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                    HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME) + WORKWOM.y + (INCOME * WORKWOM.y),  Train5)[,-1]
+Xtest <- model.matrix(logmove ~ logp + lastweeklogp + (lastweeklogp * brand) + (lastweeklogp * INCOME) + (lastweeklogp * logp)+ (logp * brand) + (brand * feat) + 
+                        brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                        HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME)+ WORKWOM.y + (INCOME * WORKWOM.y),  set5)[,-1]
+set.seed(720)
+cvfit <- cv.glmnet(X, Train5$logmove, alpha=1)
+lasso_v1 <- glmnet(X, Train5$logmove, alpha=1)
+
+plot(lasso_v1)
+plot(cvfit)
+coef(lasso_v1, s = lasso_v1$lambda.min)
+
+#results. Why are they different
+cvfit$lambda.min
+min(lasso_v1$lambda)
+
+
+log(cvfit$lambda.min)
+
+coef(cvfit, s= "lambda.min") #why is the output not the same as line 97
+
+fit =  glmnet(X, Train5$logmove, alpha=1, lambda = cvfit$lambda.min)
+summary(fit)
+#educ:age60 -11 ?? 
+fit$beta[,1]
+
+#2d (validation)
+LASSOpredict <- predict(cvfit,s=cvfit$lambda.min,  Xtest)
+meanMSEtest <- mean((LASSOpredict - set5$logmove)^2) 
+#(outof sample mse)
+mean(cvfit$cvm)
+
+#2e
+
+# I Used my intuition to choose the variables that can be interpreted as 
+# elasticities. And the key interaction terms involving socio-demographic variables. 
+# However, it is better to use LASSO 
+# because then we can gather more statistically significant variables that may not 
+# have any blatant economical intuition. 
+
+#3 0 variables were removed
+
+
+LASSO_OLS <- lm(logmove ~ logp + lastweeklogp + (lastweeklogp * brand) + (lastweeklogp * INCOME) + (lastweeklogp * logp)+ (logp * brand) + (brand * feat) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME) + WORKWOM.y + (INCOME * WORKWOM.y),  Train5)
+summary(LASSO_OLS) 
+
+
+
+
+
+#dominicks elasticity at lagged price = 1 and all other determiners set to their mean value. 
+#3a.i
+# no need to add brand interaction term because dominicks is the base case
+domPED <- LASSO_OLS$coefficients["logp"] + 0 + (LASSO_OLS$coefficients["logp:EDUC"]*mean(Df2$EDUC)) + 
+          (LASSO_OLS$coefficients["logp:HHLARGE"] * mean(Df2$HHLARGE)) + 
+          (LASSO_OLS$coefficients["logp:INCOME"] * mean(Df2$INCOME)) 
+          
+#3a.ii
+TropPED <- LASSO_OLS$coefficients["logp"] + 0 + (LASSO_OLS$coefficients["logp:EDUC"]*mean(Df2$EDUC)) + 
+  (LASSO_OLS$coefficients["logp:HHLARGE"] * mean(Df2$HHLARGE)) + 
+  (LASSO_OLS$coefficients["logp:INCOME"] * mean(Df2$INCOME)) + (LASSO_OLS$coefficients["logp:brandtropicana"])
+
+#3a.iii
+LASSO_OLS_feat <- lm(logmove ~ logp + (logp * feat * brand)+lastweeklogp + (lastweeklogp * brand) + (lastweeklogp * INCOME) + (lastweeklogp * logp) + 
+                  brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                  HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME) + WORKWOM.y + (INCOME * WORKWOM.y),  Train5)
+ 
+TropPED_featured <- LASSO_OLS_feat$coefficients["logp"] + 0 + (LASSO_OLS_feat$coefficients["logp:EDUC"]*mean(Df2$EDUC)) + 
+  (LASSO_OLS_feat$coefficients["logp:HHLARGE"] * mean(Df2$HHLARGE)) + 
+  (LASSO_OLS_feat$coefficients["logp:INCOME"] * mean(Df2$INCOME)) + (LASSO_OLS_feat$coefficients["logp:feat:brandtropicana"])
+
+#3b
+# Tropicana has the most elastic demand when it is featured. But minute maid has the most elastic demand when it is not featured. 
+# Higher demand elasicity implies that they have to have lower markups. 
+#4 
+OJnew <- Df2 %>%  select( brand , store , logp, week) %>% 
+  spread(brand, logp) 
+
+Df3 <- Df2 %>% select(brand, store, logmove.x, logmove, week , logp, feat, lastweeklogp, INCOME, EDUC, AGE60, WORKWOM.y, ETHNIC)
+
+OJ2 <- full_join(OJnew , Df3, by = c("store","week")) 
+
+tropicana_set <- OJ2 %>% filter(brand == "tropicana")
+dominicks_set <- OJ2 %>% filter(brand == "dominicks")
+minutemaid_set <- OJ2 %>% filter(brand == "minute.maid")
+
+dominicksreg <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana) + INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = dominicks_set)
+summary(dominicksreg)
+
+tropicanareg <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana) + INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = tropicana_set)
+summary(tropicanareg)
+
+minutemaidreg <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana) + INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = minutemaid_set)
+summary(minutemaidreg)
+
+elasticities <- matrix(1:9, nrow = 3)
+rownames(elasticities) <- c("tropicana","minutemaid","dominicks")
+colnames(elasticities) <- c("PED_tropicana", "PED_MinuteMaid", "PED_dominicks")
+
+elasticities[1,1] <- coef(tropicanareg)["tropicana"]
+elasticities[1,2] <- coef(tropicanareg)["minute.maid"]
+elasticities[1,3] <- coef(tropicanareg)["dominicks"]
+elasticities[2,1] <- coef(minutemaidreg)["tropicana"]
+elasticities[2,2] <- coef(minutemaidreg)["minute.maid"]
+elasticities[2,3] <- coef(minutemaidreg)["dominicks"]
+elasticities[3,1] <- coef(dominicksreg)["tropicana"]
+elasticities[3,2] <- coef(dominicksreg)["minute.maid"]
+elasticities[3,3] <- coef(dominicksreg)["dominicks"]
+
+dominicksreg2 <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana) + (dominicks * feat)+ (tropicana * feat)+ (minute.maid * feat) + INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = dominicks_set)
+summary(dominicksreg2)
+
+tropicanareg2 <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana) + (dominicks * feat)+ (tropicana * feat)+ (minute.maid * feat)+ INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = tropicana_set)
+summary(tropicanareg2)
+
+minutemaidreg2 <- lm(logmove ~ (dominicks) + (minute.maid) + (tropicana)+ (dominicks * feat)+ (tropicana * feat)+ (minute.maid * feat) + INCOME + EDUC + (EDUC * AGE60)+ AGE60 + WORKWOM.y + ETHNIC , data = minutemaid_set)
+summary(minutemaidreg2)
+
+elasticities_feat <- matrix(1:9, nrow = 3)
+rownames(elasticities_feat) <- c("tropicana","minutemaid","dominicks")
+colnames(elasticities_feat) <- c("PED_tropicana", "PED_MinuteMaid", "PED_dominicks")
+
+elasticities_feat[1,1] <- coef(tropicanareg2)["tropicana"] + coef(tropicanareg2)["tropicana:feat"]
+elasticities_feat[1,2] <- coef(tropicanareg2)["minute.maid"] + coef(tropicanareg2)["minute.maid:feat"]
+elasticities_feat[1,3] <- coef(tropicanareg2)["dominicks"] + coef(tropicanareg2)["dominicks:feat"]
+elasticities_feat[2,1] <- coef(minutemaidreg2)["tropicana"] + coef(minutemaidreg2)["tropicana:feat"]
+elasticities_feat[2,2] <- coef(minutemaidreg2)["minute.maid"] + coef(minutemaidreg2)["minute.maid:feat"]
+elasticities_feat[2,3] <- coef(minutemaidreg2)["dominicks"] + coef(minutemaidreg2)["dominicks:feat"]
+elasticities_feat[3,1] <- coef(dominicksreg2)["tropicana"] + coef(minutemaidreg2)["tropicana:feat"]
+elasticities_feat[3,2] <- coef(dominicksreg2)["minute.maid"] + coef(minutemaidreg2)["minute.maid:feat"]
+elasticities_feat[3,3] <- coef(dominicksreg2)["dominicks"] + coef(minutemaidreg2)["dominicks:feat"]
+
+
+

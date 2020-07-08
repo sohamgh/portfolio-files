@@ -1,0 +1,37 @@
+OJ <- read.csv("oj.csv")
+#install.packages('dplyr')
+#install.packages("ggplot2")
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+#install.packages("randomForest")
+#install.packages('glmnet')
+library("randomForest")
+library(glmnet)
+OJ$logp <- log(OJ$price)
+X <- model.matrix(logmove ~ logp  + 
+                     (logp * brand) + 
+                    (brand * feat) + brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                    HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME) + WORKWOM + (INCOME * WORKWOM),  OJ)[,-1]
+set.seed(720)
+cvfit <- cv.glmnet(X, OJ$logmove, alpha=1)
+fit =  glmnet(X, OJ$logmove, alpha=1, lambda = cvfit$lambda.min)
+
+LASSOMSE <- cvfit$cvm[cvfit$lambda == cvfit$lambda.min]
+
+oj.rf <- randomForest(logmove ~ logp  + 
+                        (logp * brand) + 
+                        (brand * feat) + brand + feat + (logp * EDUC) + EDUC + INCOME + ETHNIC +
+                        HHLARGE +(HHLARGE* logp) +AGE60 + (AGE60 * EDUC) + (AGE60 * INCOME) + (logp * INCOME) + WORKWOM + (INCOME * WORKWOM), data = OJ, ntree = 	100, keep.forest = TRUE) 
+OJ$pred_logmove_rf = predict(oj.rf)
+MSE_rf <- 	mean((OJ$logmove - OJ$pred_logmove_rf)^2)
+
+plot1 <- ggplot() + 
+  geom_line(data = OJ, aes(x = logp, y = logmove ), color = "blue") +
+  geom_line(data = OJ, aes(x = logp, y = pred_logmove_rf), color = "red") +
+  xlab('log_price') +
+  ylab('logmove') 
+  #scale_color_discrete(name = "Series", labels = c("Observed", "Predicted"))
+print(plot1)
+## blue is observed, red is predicted 
+
